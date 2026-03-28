@@ -1,8 +1,9 @@
-flask
-flask-cors
-flask-socketio
-python-pptx
-requests
-psycopg2-binary
-gunicorn
-eventlet
+flask==2.3.3
+flask-cors==4.0.0
+flask-socketio==5.3.6
+python-pptx==0.6.23
+requests==2.31.0
+psycopg2-binary==2.9.9
+gunicorn==21.2.0
+eventlet==0.33.3
+Werkzeug==2.3.7

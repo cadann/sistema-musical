@@ -1562,7 +1562,6 @@ function enterRole(role, label, firstScreen) {
   badge.style.borderColor = info.color + '55';
   badge.style.background = info.color + '18';
   showScreen(firstScreen);
-  iniciarWebSocket(role);
 }
 
 function goHome() {
@@ -1661,16 +1660,6 @@ function renderPlaylists() {
     </div>`).join('');
 }
 
-async function salvarPlaylistNoBanco(pl) {
-  try {
-    await fetch(SERVIDOR_URL + '/api/playlists', {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify(pl)
-    });
-  } catch(e) { console.warn('Erro ao salvar playlist:', e); }
-}
-
 function selectPlaylist(idx) {
   selectedPlaylist = idx;
   renderPlaylists();
@@ -1699,38 +1688,18 @@ function selectPlaylist(idx) {
 
 // ── EVENTS ──
 // ── EVENTOS ──
+const EVENTOS_KEY = 'musicafacil_eventos';
 let eventos = [];
 
-async function carregarEventos() {
+function carregarEventos() {
   try {
-    const r = await fetch(SERVIDOR_URL + '/api/eventos');
-    eventos = await r.json();
-  } catch(e) {
-    console.warn('Erro ao carregar eventos');
-    eventos = [];
-  }
+    const saved = localStorage.getItem(EVENTOS_KEY);
+    if (saved) eventos = JSON.parse(saved);
+  } catch(e) { eventos = []; }
 }
 
-async function salvarEventos() {
-  // Eventos são salvos individualmente em salvarEvento()
-}
-
-async function salvarEventoNoBanco(ev) {
-  try {
-    const r = await fetch(SERVIDOR_URL + '/api/eventos', {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify(ev)
-    });
-    const data = await r.json();
-    return data.id;
-  } catch(e) { console.warn('Erro ao salvar evento:', e); }
-}
-
-async function deletarEventoDoBanco(id) {
-  try {
-    await fetch(SERVIDOR_URL + '/api/eventos/' + id, { method: 'DELETE' });
-  } catch(e) { console.warn('Erro ao deletar evento:', e); }
+function salvarEventos() {
+  try { localStorage.setItem(EVENTOS_KEY, JSON.stringify(eventos)); } catch(e) {}
 }
 
 function gerarCodigoEvento() {
@@ -1801,7 +1770,7 @@ function preencherSelectsEvento(ev) {
   if (ev) selOp.value = ev.operadorId || '';
 }
 
-async function salvarEvento() {
+function salvarEvento() {
   const nome = document.getElementById('event-nome').value.trim();
   const musicoId = document.getElementById('event-musico').value;
   const errEl = document.getElementById('event-save-error');
@@ -1840,20 +1809,19 @@ async function salvarEvento() {
     eventos.unshift(ev);
   }
 
-  await salvarEventoNoBanco(ev);
-  await carregarEventos();
+  salvarEventos();
   closeModal('modal-add-event');
   renderEvents();
   mostrarToast('✅ Evento salvo!');
 }
 
-async function excluirEvento() {
+function excluirEvento() {
   const id = document.getElementById('event-edit-id').value;
   const ev = eventos.find(e => e.id == id);
   if (!ev) return;
   if (!confirm(`Excluir "${ev.nome}"?`)) return;
-  await deletarEventoDoBanco(id);
-  await carregarEventos();
+  eventos = eventos.filter(e => e.id != id);
+  salvarEventos();
   closeModal('modal-add-event');
   renderEvents();
 }
@@ -1924,7 +1892,7 @@ function renderEvents() {
   }).join('');
 }
 
-async function iniciarEvento(id) {
+function iniciarEvento(id) {
   const ev = eventos.find(e => e.id === id);
   if (!ev) return;
   const pl = playlists.find(p => p.id == ev.playlistId);
@@ -1936,8 +1904,7 @@ async function iniciarEvento(id) {
     activeStropheIdx = 0;
   }
   ev.status = 'live';
-  await salvarEventoNoBanco(ev);
-  await carregarEventos();
+  salvarEventos();
   renderEvents();
   showScreen('controle');
   mostrarToast(`▶ Evento "${ev.nome}" iniciado!`);
@@ -2301,13 +2268,13 @@ function importarTxtMultiplo(event) {
       const jaExiste = isDuplicada(song);
       if (!jaExiste) {
         songs.unshift(song);
-        salvarMusica(song);
         importadas++;
       } else {
         duplicadas++;
       }
       if (importadas + duplicadas === files.length) {
         if (importadas > 0) {
+          salvarStorage();
           renderSongs(songs);
           renderEstrofesSelect();
           renderCifraSelect();
@@ -2351,7 +2318,7 @@ async function importarPptxViaServidor(event) {
       }
     });
     if (novas > 0) {
-      await salvarStorage();
+      salvarStorage();
       renderSongs(songs);
       renderEstrofesSelect();
       renderCifraSelect();
@@ -2530,7 +2497,7 @@ async function importarPdfGemini(event) {
   }
 
   if (ok > 0) {
-    await salvarStorage();
+    salvarStorage();
     renderSongs(songs);
     renderCifraSelect();
     renderLetraSelect();
@@ -2625,7 +2592,7 @@ function salvarMusica() {
   };
 
   songs.unshift(newSong);
-  salvarMusica(newSong);
+  salvarStorage();
 
   // Limpa o formulário
   limparFormularioMusica();
@@ -2682,89 +2649,68 @@ document.querySelectorAll('.modal').forEach(m => {
 });
 
 // ── PERSISTÊNCIA (localStorage) ──
-// ── PERSISTÊNCIA VIA API REST (SQLite no servidor) ───────────────────────────
+const STORAGE_KEY = 'musicafacil_songs';
 
-async function salvarStorage() {
-  // Salva todas as músicas no banco via bulk
-  try {
-    await fetch(SERVIDOR_URL + '/api/musicas/bulk', {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify(songs)
-    });
-  } catch(e) { console.warn('Erro ao salvar músicas:', e); }
+function salvarStorage() {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(songs)); } catch(e) {}
 }
 
-async function salvarMusica(song) {
-  // Salva uma única música
+function carregarStorage() {
   try {
-    const r = await fetch(SERVIDOR_URL + '/api/musicas', {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify(song)
-    });
-    const data = await r.json();
-    return data.id;
-  } catch(e) { console.warn('Erro ao salvar música:', e); }
-}
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        songs.length = 0;
+        const vistos = new Set();
 
-async function deletarMusica(id) {
-  try {
-    await fetch(SERVIDOR_URL + '/api/musicas/' + id, { method: 'DELETE' });
-  } catch(e) { console.warn('Erro ao deletar música:', e); }
-}
+        // Mapa de sequencias corrompidas → caractere correto sem acento
+        const corrigir = txt => {
+          if (!txt) return txt;
+          return txt
+            .replace(/A£/g,'a').replace(/A§/g,'c').replace(/A©/g,'e')
+            .replace(/A³/g,'o').replace(/A¡/g,'a').replace(/A­/g,'i')
+            .replace(/A³/g,'o').replace(/Ãº/g,'u').replace(/A¼/g,'u')
+            .replace(/A‡/g,'C').replace(/Ã‰/g,'E').replace(/Ã"/g,'O')
+            .replace(/Ã€/g,'A').replace(/Ã‚/g,'A').replace(/Ã•/g,'O')
+            .replace(/Ãœ/g,'U').replace(/Ã„/g,'A').replace(/Ã'/g,'N')
+            // Remove acentos unicode restantes
+            .normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+        };
 
-async function carregarStorage() {
-  try {
-    const r = await fetch(SERVIDOR_URL + '/api/musicas');
-    const data = await r.json();
-    songs.length = 0;
-    data.forEach(s => songs.push(s));
-  } catch(e) {
-    console.warn('Servidor indisponível, usando localStorage como fallback');
-    try {
-      const saved = localStorage.getItem('musicafacil_songs');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) { songs.length = 0; parsed.forEach(s => songs.push(s)); }
+        parsed.forEach(s => {
+          s.title  = corrigir(s.title)  || s.title;
+          s.artist = corrigir(s.artist) || s.artist;
+          if (Array.isArray(s.strophes)) {
+            s.strophes = s.strophes.map(st => corrigir(st));
+          }
+          if (s.cifra) s.cifra = corrigir(s.cifra);
+
+          const chave = (s.title || '').toLowerCase().trim();
+          if (chave && !vistos.has(chave)) {
+            vistos.add(chave);
+            songs.push(s);
+          }
+        });
+        salvarStorage();
       }
-    } catch(e2) {}
-  }
+    }
+  } catch(e) {}
 }
 
 // ── MEMBROS (Músicos & Operadores) ──
+const MEMBROS_KEY = 'musicafacil_membros';
 let membros = [];
 
-async function salvarMembros() {
-  // Salva membro individualmente (chamado após add/edit)
+function carregarMembros() {
+  try {
+    const saved = localStorage.getItem(MEMBROS_KEY);
+    if (saved) membros = JSON.parse(saved);
+  } catch(e) { membros = []; }
 }
 
-async function salvarMembroNoBanco(membro) {
-  try {
-    const r = await fetch(SERVIDOR_URL + '/api/membros', {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify(membro)
-    });
-    const data = await r.json();
-    return data.id;
-  } catch(e) { console.warn('Erro ao salvar membro:', e); }
-}
-
-async function deletarMembroDoBanco(id) {
-  try {
-    await fetch(SERVIDOR_URL + '/api/membros/' + id, { method: 'DELETE' });
-  } catch(e) { console.warn('Erro ao deletar membro:', e); }
-}
-
-async function carregarMembros() {
-  try {
-    const r = await fetch(SERVIDOR_URL + '/api/membros');
-    membros = await r.json();
-  } catch(e) {
-    console.warn('Erro ao carregar membros');
-    membros = [];
-  }
+function salvarMembros() {
+  try { localStorage.setItem(MEMBROS_KEY, JSON.stringify(membros)); } catch(e) {}
 }
 
 function renderMembros() {
@@ -2827,15 +2773,11 @@ function salvarMembro() {
   errEl.style.display = 'none';
   if (editId) {
     const idx = membros.findIndex(m => m.id == editId);
-    if (idx !== -1) {
-      membros[idx] = { ...membros[idx], nome, funcao, contato, obs };
-      salvarMembroNoBanco(membros[idx]);
-    }
+    if (idx !== -1) membros[idx] = { ...membros[idx], nome, funcao, contato, obs };
   } else {
-    const novoMembro = { id: Date.now(), tipo, nome, funcao, contato, obs };
-    membros.push(novoMembro);
-    salvarMembroNoBanco(novoMembro);
+    membros.push({ id: Date.now(), tipo, nome, funcao, contato, obs });
   }
+  salvarMembros();
   renderMembros();
   closeModal('modal-add-membro');
 }
@@ -2847,7 +2789,7 @@ function excluirMembro() {
   if (!m) return;
   if (!confirm(`Excluir "${m.nome}"?`)) return;
   membros = membros.filter(m => m.id != editId);
-  deletarMembroDoBanco(editId);
+  salvarMembros();
   renderMembros();
   closeModal('modal-add-membro');
 }
@@ -3201,7 +3143,7 @@ function salvarEdicao() {
   songs[idx].cifra  = texto;
   songs[idx].strophes = estrofes;
   songs[idx].obs = document.getElementById('edit-song-obs').value.trim();
-  salvarMusica(songs[idx]);
+  salvarStorage();
   closeModal('modal-edit-song');
   renderSongs(songs);
   renderEstrofesSelect();
@@ -3212,9 +3154,8 @@ function excluirMusica() {
   const idx = songs.findIndex(s => s.id === id);
   if (idx === -1) return;
   if (!confirm('Excluir "' + songs[idx].title + '"?')) return;
-  const idExcluir = songs[idx].id;
   songs.splice(idx, 1);
-  deletarMusica(idExcluir);
+  salvarStorage();
   closeModal('modal-edit-song');
   renderSongs(songs);
   renderEstrofesSelect();
@@ -3523,7 +3464,12 @@ function emitirNavegacao() {
   });
 }
 
-
+// Sobrescreve enterRole para iniciar WebSocket
+const _origEnterRole = enterRole;
+enterRole = function(role, label, firstScreen) {
+  _origEnterRole(role, label, firstScreen);
+  iniciarWebSocket(role);
+};
 
 // ── SIDEBAR MOBILE ──
 function toggleSidebar() {
@@ -3558,91 +3504,27 @@ showScreen = function(name) {
 })();
 
 // ── INIT ──
-async function fetchComTimeout(url, opcoes = {}, ms = 5000) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), ms);
-  try {
-    const r = await fetch(url, { ...opcoes, signal: controller.signal });
-    clearTimeout(timer);
-    return r;
-  } catch(e) {
-    clearTimeout(timer);
-    throw e;
-  }
-}
-
-function renderizarTudo() {
-  renderSongs(songs);
-  renderPlaylists();
-  renderEvents();
-  renderLiveSongList();
-  renderStrophes();
-  renderPublic();
-  generateQR();
-  renderDashPreview();
-  renderMusico();
-  renderCoMusico();
-  renderOperador();
-  renderEstrofesSelect();
-  renderLetraSelect();
-  renderCifraSelect();
-  if (songs.length > 0) {
-    sincronizarSong(songs[0].id);
-    tvSetSong(songs[0], 0);
-  }
-  renderMembros();
-  carregarGeminiKey();
-}
-
-async function inicializar() {
-  // Renderiza imediatamente com dados vazios para home ficar responsiva
-  renderizarTudo();
-  fecharToast();
-
-  // Carrega dados do banco em background
-  mostrarToast('⏳ Carregando dados...', 0);
-  try {
-    await Promise.all([
-      carregarStorage(),
-      carregarMembros(),
-      carregarEventos(),
-    ]);
-
-    // Playlists
-    try {
-      const r = await fetchComTimeout(SERVIDOR_URL + '/api/playlists');
-      const data = await r.json();
-      if (data.length > 0) {
-        playlists.length = 0;
-        data.forEach(p => playlists.push(p));
-      }
-    } catch(e) { console.warn('Playlists: usando padrão'); }
-
-    renderizarTudo();
-  } catch(e) {
-    console.warn('Erro ao carregar do banco:', e);
-    mostrarToast('⚠ Servidor indisponível — dados locais carregados.', 4000);
-  }
-
-  fecharToast();
-
-  // Entra como Co-Músico se acessado via QR Code
-  if (window._entrarComoCoMusico) {
-    document.getElementById('home-screen').style.display = 'none';
-    document.getElementById('sidebar').style.display = 'flex';
-    document.getElementById('main').style.display = 'flex';
-    const badge = document.querySelector('.role-badge');
-    badge.textContent = '🎵 Co-Músico';
-    badge.style.color = '#f5a623';
-    badge.style.borderColor = '#f5a62355';
-    badge.style.background = '#f5a62318';
-    showScreen('comusico');
-    iniciarWebSocket('comusico');
-    mostrarToast('🎵 Bem-vindo, Co-Músico! Código: ' + window._codigoEvento, 4000);
-  }
-}
-
-inicializar();
+carregarStorage();
+carregarMembros();
+carregarEventos();
+renderSongs(songs);
+renderPlaylists();
+renderEvents();
+renderLiveSongList();
+renderStrophes();
+renderPublic();
+generateQR();
+renderDashPreview();
+renderMusico();
+renderCoMusico();
+renderOperador();
+renderEstrofesSelect();
+renderLetraSelect();
+renderCifraSelect();
+sincronizarSong(songs[0].id);
+tvSetSong(songs[0], 0);
+renderMembros();
+carregarGeminiKey();
 
 // Entra como Co-Músico se acessado via QR Code
 if (window._entrarComoCoMusico) {
